@@ -1,0 +1,8 @@
+numpy
+pandas
+matplotlib
+beautifulsoup4
+ipykernel
+openai
+googlesearch-python
+tqdm
