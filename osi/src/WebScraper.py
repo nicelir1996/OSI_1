@@ -3,6 +3,7 @@ import os
 from bs4 import BeautifulSoup
 from googlesearch import search
 import time
+from tqdm import tqdm
 
 class WebScraper:
     """WebScraper class to scrape text from a given serch query"""
@@ -19,7 +20,7 @@ class WebScraper:
 
         if self.engine == "bing":
             self.bing_subscription_key = os.environ['BING_SEARCH_V7_SUBSCRIPTION_KEY']
-            self.bing_endpoint = os.environ['BING_SEARCH_V7_ENDPOINT'] + "/v7.0/search"
+            self.bing_endpoint = os.environ['BING_SEARCH_V7_ENDPOINT'] + "v7.0/search"
 
     def scrape(self, url):
         """Scrape text from a given url"""
@@ -70,7 +71,6 @@ class WebScraper:
         except Exception as e:
             print(f"Error while searching: {e}")
 
-        print(f"Found results for '{query}':")
         for url in urls:
             print(f"\t{url}")
         return urls
@@ -82,15 +82,17 @@ class WebScraper:
 
     def perform_search(self, search_query, n_top=1):
         page_texts = []
+        links = []
         
         search_urls = self.internet_search(search_query, num_results=n_top+3)
-        for url in search_urls:
+        for _, url in tqdm(enumerate(search_urls)):
             try:
                 page_text = self.scrape(url)
                 if page_text:
                     page_texts.append(page_text)
+                    links.append(url)
             except Exception as e:
                 print(f"Error while scraping: {e}")
                 continue
 
-        return page_texts
+        return page_texts, links

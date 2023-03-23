@@ -11,7 +11,7 @@ class Worker:
     - Summarize web pages
     - Generate SBAR responses
     """
-    PROTOCOL_FORMAT = "Task:[Taks]\n\nInformation:[Information]\n\nAnalysis:[Analysis]\n\nInsight:[Insight]\n\nAction:[Action]\n\n \n"
+    PROTOCOL_FORMAT = "Task:[Taks]\n\nInformation:[Information]\n\nAnalysis:[Analysis]\n\nInsight:[Insight]\n\nAction:[Action]\n\Sources:[SourceLinks]\n\n \n"
 
     def __init__(self, model_name="gpt-3.5-turbo", search_engine="bing"):
         self.model_name = model_name
@@ -44,9 +44,9 @@ class Worker:
             "3. Maintain a clear and coherent structure.\n"
             "4. Ensure that the summaries provide a solid understanding of the content.\n\n"
             "Example:\n\n"
-            "Input: [Task]'What is solar energy?'\n[Text]'Solar energy is the conversion of sunlight into electricity...'\n"
-            "Output: 'Solar energy involves converting sunlight into electricity. It's a clean and renewable source of power.'\n\n"
-            "Input: [Task]'Perform a market research of the tea cups industry.'\n[Text]'The report with code TIPRE00028275 is a Consumer Goods report with 150 pages that offers qualitative and quantitative analysis...'\n"
+            "Input: [Task]'What is solar energy?'\n[SourceLink]'https:\\\\mysolar.de'\n[Text]'Solar energy is the conversion of sunlight into electricity...'\n"
+            "Output: '[SourceLink]'https:\\\\mysolar.de'\n[Summary]Solar energy involves converting sunlight into electricity. It's a clean and renewable source of power.'\n\n"
+            "Input: [Task]'Perform a market research of the tea cups industry.'\n[SourceLink]'https:\\\\solargood.com'\n[Text]'The report with code TIPRE00028275 is a Consumer Goods report with 150 pages that offers qualitative and quantitative analysis...'\n"
             "Output: '{ERROR}The provided text doesn't include any relevant information.'\n\n"
             "--------\n"
         )
@@ -55,18 +55,20 @@ class Worker:
         self.config_protocol_response = (
             "----Task description----\n"
             "Please analyze the information provided in the summaries of the following top Google search results and present your findings according to the Information-Analysis-Insight-Action (IAIA) protocol. Specifically, you should:\n"
-            "1. Summarize the key information from the search results.\n"
-            "2. Analyze any patterns, trends, correlations, or noteworthy aspects found in the data.\n"
-            "3. Provide insights on implications, opportunities, risks, or challenges identified.\n"
-            "4. Suggest actions or recommendations based on the insights.\n"
-            "The final response should be no more than 500 words and be presented in the following structure:\n"
+            "1. [Task] Repeat which tasks you needed to perform.\n"
+            "2. [Information] Summarize the key information from the search results.\n"
+            "3. [Analysis] Analyze any patterns, trends, correlations, or noteworthy aspects found in the data.\n"
+            "4. [Insight] Provide insights on implications, opportunities, risks, or challenges identified.\n"
+            "5. [Action] Suggest actions or recommendations based on the insights.\n"
+            "6. [SourceLinks] Provide links to the sources of the information.\n\n"
+            "The final response should be less than 500 words. Make sure to include all the parts 1 to 6 and presented it in the following structure:\n"
             f"{self.PROTOCOL_FORMAT}"
             "--------\n"
 
         )
         self.config_self_validation = (
             "Your role is to validate the provided results and ensure that the message follows the defined Information-Analysis-Insight-Action (IAIA) protocol:\n"
-            "The final response should be no more than 500 words and be presented in the following structure:\n"
+            "The final response should be less than 400 words and be presented in the following structure:\n"
             "Information:[Information]\n\nAnalysis:[Analysis]\n\nInsight:[Insight]\n\nAction:[Action]\n\n \n"
             "The [Information] must summarize the key information from the search results.\n"
             "The [Analysis] must shocase any patterns, trends, correlations, or noteworthy aspects found in the data.\n"
@@ -125,7 +127,7 @@ class Worker:
             return message
 
         new_len = int(max_tokens*conversion_factor)
-        print(f"Truncating message from {symbol_count} to {new_len} symbols")
+        self.log(f"Truncating message from {symbol_count} to {new_len} symbols")
         return message[:new_len]
     
     def generate_search_queries(self, research_topic, n_queries=3):
@@ -146,7 +148,7 @@ class Worker:
         queries = response.strip().split("\n")
         return [query.strip() for query in queries]
 
-    def summarize_page(self, task, page_text):
+    def summarize_page(self, task, page_text, link):
         """Summarize a web page in 2-3 sentences
 
         Args:
@@ -157,7 +159,7 @@ class Worker:
         """
         self.log(f"Summarizing web page...")
 
-        prompt = f"[Task]{task}\n[Text]{page_text}"
+        prompt = f"[Task]{task}\n[SourceLink]{link}\n[Text]{page_text}"
         prompt = self.truncate_message(prompt, 4096-700)
         messages = [{"role": "system", "content": self.config_summarize_page + self.config_adversarial_protection}] + self.correction_prompt + [{"role": "user", "content": prompt}]
         response = self.openai.gen_request_to_api(messages, max_tokens=500, temperature=0.5, n=1, stop=None)
@@ -182,7 +184,7 @@ class Worker:
         sbar = response.strip()
         return sbar
 
-    def perform_task(self, research_topic, n_queries=3, depth_n=1):
+    def perform_task(self, research_topic, n_queries=2, depth_n=2):
         # Generate search queries
         search_queries = self.generate_search_queries(research_topic, n_queries=n_queries)
 
@@ -191,12 +193,12 @@ class Worker:
         for query in search_queries:
             self.log(f"Performing summary for '{query}'...")
             # Use a search engine API or a custom scraper to obtain the URLs of the top x search results for each query
-            page_texts = self.scraper.perform_search(query, n_top = 20)  # a list of text content of the web pages
+            page_texts, links = self.scraper.perform_search(query, n_top = 5)  # a list of text content of the web pages
 
             # Summarize the web pages
-            for page_text in page_texts:
+            for _, (page_text, link) in enumerate(zip(page_texts, links)):
                 try:
-                    summary = self.summarize_page(research_topic, page_text)
+                    summary = self.summarize_page(research_topic, page_text, link)
                     if "{ERROR}" in summary:
                         self.log(f"Skipping summary because of error: {summary}")
                         continue
@@ -231,9 +233,9 @@ class Worker:
         self.log(f"Performing self-check...")
 
         prompt = self.config_self_validation + self.config_adversarial_protection + f"Self-check:\n\n{protocol_report}"
-        prompt = self.truncate_message(prompt, 4096-500)
+        prompt = self.truncate_message(prompt, 4096-400)
         messages = [{"role": "user", "content": prompt}]
-        response = self.openai.gen_request_to_api(messages, max_tokens=500, temperature=0.5, n=1, stop=None)
+        response = self.openai.gen_request_to_api(messages, max_tokens=400, temperature=0.5, n=1, stop=None)
         self_check = response.strip()
         self.log(f"XXXXXXXXXXXXXXXHere is a self_check: {self_check}")
         if "{ERROR}" in response:
